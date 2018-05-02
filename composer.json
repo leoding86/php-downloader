@@ -1,0 +1,22 @@
+{
+    "name": "leoding86/downloader",
+    "description": "A simple downloader library",
+    "type": "library",
+    "require": {
+        "guzzlehttp/guzzle": "^6.3",
+        "sunra/php-simple-html-dom-parser": "^1.5"
+    },
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "leoding86",
+            "email": "leoding86@msn.com"
+        }
+    ],
+    "minimum-stability": "dev",
+    "autoload": {
+        "psr-4": {
+            "leoding86\\Downloader\\": "src/"
+        }
+    }
+}
