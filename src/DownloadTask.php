@@ -1,9 +1,9 @@
 <?php namespace leoding86\Downloader;
 
-use GuzzleHttp\Client;
-
 class DownloadTask
 {
+    use Traits\MagicSetter;
+
     const BEGIN_EVENT = 1;
     const COMPELET_EVENT = 2;
     const PROGRESS_EVENT = 3;
@@ -19,27 +19,19 @@ class DownloadTask
 
     protected $timeout = '10.0'; // 超时
 
-    protected $userAgent; // UA
+    protected $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/68.0.3409.2 Safari/537.36'; // UA
 
     protected $events = []; // 事件容器
-
-    public function __set($property, $value)
-    {
-        if (property_exists($this, $property)) {
-            $setPropertyMethod = 'set' . ucfirst($property);
-
-            if (method_exists($this, $setPropertyMethod)) {
-                $this->$setPropertyMethod($value);
-            } else {
-                $this->$property = $value;
-            }
-        }
-    }
 
     public function setChunkSize($size)
     {
         if (!is_int($size)) {
             throw new Exception('Property chunckSize must be a number');
         }
+    }
+
+    public function start()
+    {
+
     }
 }
