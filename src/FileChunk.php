@@ -2,6 +2,8 @@
 
 class FileChunk
 {
+    use Traits\MagicGetter;
+
     protected $start;
 
     protected $end;

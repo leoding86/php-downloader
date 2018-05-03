@@ -1,37 +1,152 @@
 <?php namespace leoding86\Downloader;
 
+use Exception;
+
 class DownloadTask
 {
     use Traits\MagicSetter;
+    use Traits\MagicGetter;
 
-    const BEGIN_EVENT = 1;
-    const COMPELET_EVENT = 2;
-    const PROGRESS_EVENT = 3;
-    const ERROR_EVENT = 4;
+    protected $resource;
 
-    protected $resource; // 资源地址
+    protected $headers;
 
-    protected $fileSize; // 资源文件大小
+    protected $chunkSize = 1024 * 1024 * 5;
 
-    protected $chunkSize; // 分片下载大小
+    protected $timeout = 27.0;
 
-    protected $proxy; // 设置代理
+    protected $filename;
 
-    protected $timeout = '10.0'; // 超时
+    protected $saveDir;
 
-    protected $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/68.0.3409.2 Safari/537.36'; // UA
+    protected $proxy;
 
-    protected $events = []; // 事件容器
+    protected $enableStream;
+
+    protected $verbose = false;
+
+    private $downloadRequest;
+
+    private $file;
+
+    public function __construct($resource, $saveDir)
+    {
+        $this->setResource($resource);
+        $this->setSaveDir($saveDir);
+    }
+
+    public function setResource($resource)
+    {
+        if (!preg_match('/^https?:\/{2}/', $resource)) {
+            throw new Exception('Unsupported resource type');
+        }
+
+        $this->resource = $resource;
+    }
 
     public function setChunkSize($size)
     {
         if (!is_int($size)) {
-            throw new Exception('Property chunckSize must be a number');
+            throw new Exception('Property chunkSize must be a number');
         }
+
+        $this->chunkSize = $size;
+    }
+
+    public function setSaveDir($dir)
+    {
+        if (!is_dir($dir)) {
+            throw new Exception('Save dir is invalid');
+        }
+
+        $this->saveDir = realpath($dir);
     }
 
     public function start()
     {
+        $this->downloadRequest = new DownloadRequest();
+        $this->downloadRequest->resource = $this->resource;
+        $this->downloadRequest->chunkSize = $this->chunkSize;
+        $this->downloadRequest->timeout = $this->timeout;
+        $this->downloadRequest->chunkSize = $this->chunkSize;
+        $this->downloadRequest->proxy = $this->proxy;
+        $this->downloadRequest->enableStream = $this->enableStream;
 
+        $this->regiesterEventListeners();
+
+        $this->downloadRequest->begin();
+    }
+
+    public function getFilename()
+    {
+        if (preg_match('/[^\/]+\.[^\/.]+$/', explode('#', $this->resource)[0], $matches)) {
+            return $matches[0];
+        } else {
+            return md5($this->resource);
+        }
+    }
+
+    public function createFile()
+    {
+        $file = fopen($this->getFullPath(), 'w+');
+        return $file;
+    }
+
+    public function getFullPath()
+    {
+        return $this->saveDir . '/' . $this->filename;
+    }
+
+    public function regiesterEventListeners()
+    {
+        $this->downloadRequest->attachEvent(
+            DownloadRequest::REQUEST_FILE_SIZE_EVENT,
+            function ($downloadRequest, $fileSize, $response) {
+                if (is_null($this->filename)) {
+                    if (!empty($contentDisposition = $response->getHeader('Content-Disposition'))
+                        && preg_match('/filename="([^"]+)"/', $response->getHeaderLine('Content-Disposition'), $matches)
+                    ) {
+                        $this->filename = $matches[1];
+                    } else {
+                        $this->filename = $this->getFilename();
+                    }
+                }
+
+                $this->file = $this->createFile();
+
+                if ($this->verbose) {
+                    printf("File size is $fileSize" . PHP_EOL);
+                }
+            }
+        );
+
+        $this->downloadRequest->attachEvent(
+            DownloadRequest::ERROR_EVENT,
+            function ($downloadRequest, $error) {
+                throw new Exception($error);
+            }
+        );
+
+        $this->downloadRequest->attachEvent(
+            DownloadRequest::READ_CHUNKED_FILE_EVENT,
+            function ($downloadRequest, $chunkedData, $downloadedSize) {
+                fwrite($this->file, $chunkedData);
+
+                if ($this->verbose) {
+                    printf("Download progress: $downloadedSize / $downloadRequest->fileSize" . PHP_EOL);
+                }
+            }
+        );
+
+        $this->downloadRequest->attachEvent(
+            DownloadRequest::COMPLETE_EVENT,
+            function ($downloadRequest) {
+                fclose($this->file);
+
+                if ($this->verbose) {
+                    printf("Download complete, save in {$this->getFullPath()}" . PHP_EOL);
+                }
+            }
+        );
     }
 }
