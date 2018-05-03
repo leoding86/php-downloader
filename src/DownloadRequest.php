@@ -3,6 +3,7 @@
 use GuzzleHttp\Client;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Exception\ClientException;
+use leoding86\Downloader\Exception\RequestException;
 
 class DownloadRequest
 {
@@ -15,7 +16,6 @@ class DownloadRequest
     const READ_CHUNKED_FILE_EVENT = 3;
     const REQUEST_FILE_SIZE_EVENT = 4;
     const COMPLETE_EVENT = 5;
-    const ERROR_EVENT = 99;
     const REQUEST_FAILED_ERROR = 100;
     const FILE_TOO_SMALL_ERROR = 101;
     const GET_FILE_SIZE_FAILED_ERROR = 102;
@@ -98,27 +98,19 @@ class DownloadRequest
 
             $response = $client->send($request, $requestSettings);
         } catch (ClientException $e) {
-            $this->dispatchEvent(self::ERROR_EVENT, [$this, self::REQUEST_FAILED_ERROR]);
-            return;
-        }
-
-        if (!in_array($response->getStatusCode(), [200, 201])) {
-            $this->dispatchEvent(self::ERROR_EVENT, [$this, self::GET_FILE_SIZE_FAILED_ERROR]);
-            return;
+            throw new RequestException(null, self::REQUEST_FAILED_ERROR, $e);
         }
 
         $contentLength = $response->getHeader('content-length');
 
         if (empty($contentLength)) {
-            $this->dispatchEvent(self::ERROR_EVENT, [$this, self::CANNOT_REQUEST_FILE_SIZE_ERROR]);
-            return;
+            throw new RequestException(null, self::CANNOT_GET_FILE_SIZE_ERROR);
         }
 
         $this->fileSize = $contentLength[0];
 
         if ($this->fileSize <= 0) {
-            $this->dispatchEvent(self::ERROR_EVENT, [$this, self::FILE_TOO_SMALL_ERROR]);
-            return;
+            throw new RequestExcetpion(null, self::FILE_TOO_SMALL_ERROR);
         }
 
         $this->dispatchEvent(self::REQUEST_FILE_SIZE_EVENT, [$this, $this->fileSize, $response]);
@@ -150,8 +142,7 @@ class DownloadRequest
 
             $response = $client->send($request, $requestSettings);
         } catch (ClientException $e) {
-            $this->dispatchEvent(self::ERROR_EVENT, [$this, self::REQUEST_FILE_FAILED_ERROR]);
-            return;
+            throw new RequestException(null, self::REQUEST_FILE_FAILED_ERROR);
         }
 
         $body = $response->getBody();
@@ -197,8 +188,7 @@ class DownloadRequest
 
             $this->dispatchEvent(self::COMPLETE_EVENT, [$this]);
         } catch (ClientException $e) {
-            $this->dispatchEvent(self::ERROR_EVENT, [$this, self::REQUEST_FILE_FAILED_ERROR]);
-            return;
+            throw new RequestException(null, self::REQUEST_FILE_FAILED_ERROR);
         }
     }
 
