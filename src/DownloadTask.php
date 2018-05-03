@@ -121,13 +121,6 @@ class DownloadTask
         );
 
         $this->downloadRequest->attachEvent(
-            DownloadRequest::ERROR_EVENT,
-            function ($downloadRequest, $error) {
-                throw new Exception($error);
-            }
-        );
-
-        $this->downloadRequest->attachEvent(
             DownloadRequest::READ_CHUNKED_FILE_EVENT,
             function ($downloadRequest, $chunkedData, $downloadedSize) {
                 fwrite($this->file, $chunkedData);
