@@ -66,10 +66,6 @@ class DownloadRequest
 
     public function begin()
     {
-        if (is_string($this->proxy) && !preg_match('/https?/', $this->proxy)) {
-            $this->enableStream = false;
-        }
-
         $this->requestFileSize();
         $this->requestFile();
     }
@@ -213,6 +209,13 @@ class DownloadRequest
 
         if (!is_null($this->proxy)) {
             $settings['proxy'] = $this->proxy;
+        }
+        
+        /**
+         * stream模式不支持非socks5代理
+         */
+        if (is_string($this->proxy) && !preg_match('/https?/', $this->proxy)) {
+            $settings['stream'] = false;
         }
 
         return $settings;
