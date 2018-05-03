@@ -66,7 +66,7 @@ class DownloadRequest
 
     public function begin()
     {
-        if (is_string($this->proxy) && !preg_match('https?', $this->proxy)) {
+        if (is_string($this->proxy) && !preg_match('/https?/', $this->proxy)) {
             $this->enableStream = false;
         }
 
