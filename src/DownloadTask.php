@@ -133,7 +133,7 @@ class DownloadTask
                 fwrite($this->file, $chunkedData);
 
                 if ($this->verbose) {
-                    printf("Download progress: $downloadedSize / $downloadRequest->fileSize" . PHP_EOL);
+                    printf("Download progress: $downloadedSize / $downloadRequest->fileSize (" . round($downloadedSize * 100 / $downloadRequest->fileSize, 1) . "%%)" . PHP_EOL);
                 }
             }
         );
