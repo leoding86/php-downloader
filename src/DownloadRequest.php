@@ -1,5 +1,6 @@
 <?php namespace leoding86\Downloader;
 
+use Exception;
 use GuzzleHttp\Client;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Exception\ClientException;
@@ -16,11 +17,13 @@ class DownloadRequest
     const READ_CHUNKED_FILE_EVENT = 3;
     const REQUEST_FILE_SIZE_EVENT = 4;
     const COMPLETE_EVENT = 5;
+    const RETRY_READ_CHUNK_EVENT = 6;
     const REQUEST_FAILED_ERROR = 100;
     const FILE_TOO_SMALL_ERROR = 101;
     const GET_FILE_SIZE_FAILED_ERROR = 102;
     const CANNOT_REQUEST_FILE_SIZE_ERROR = 103;
     const REQUEST_FILE_FAILED_ERROR = 104;
+    const FILE_NOT_EXISTS_ERROR = 105;
 
     protected $resource; // 资源地址
 
@@ -39,6 +42,10 @@ class DownloadRequest
     protected $chunkList = [];
 
     protected $enableStream = true;
+
+    protected $chunkRetry = 5;
+
+    protected $retryChunkInterval = 300;
 
     public function setChunkSize($size)
     {
@@ -94,6 +101,9 @@ class DownloadRequest
 
             $response = $client->send($request, $requestSettings);
         } catch (ClientException $e) {
+            if ($e->getCode() >= 400 && $e->getCode() <= 499) {
+                throw new RequestException(null, self::FILE_NOT_EXISTS_ERROR, $e);
+            }
             throw new RequestException(null, self::REQUEST_FAILED_ERROR, $e);
         }
 
@@ -190,9 +200,23 @@ class DownloadRequest
 
     public function requestChunkedFile($request)
     {
+        $retry = 0;
         $request = $request->withHeader('Range', $this->offsetChunk($this->chunkIndex)->getHeaderRangeValue());
         $client = new Client;
-        return $client->send($request, $this->getRequestSettings())->getBody();
+        $lastException = null;
+
+        while (!$this->reachChunkRetryLimit($retry++)) {
+            try {
+                usleep($this->retryChunkInterval);
+                $chunkData = $client->send($request, $this->getRequestSettings())->getBody();
+                return $chunkData;
+            } catch (Exception $e) {
+                $this->dispatchEvent(self::RETRY_READ_CHUNK_EVENT, [$this, $retry]);
+                $lastException = $e;
+            }
+        }
+
+        throw $lastException;
     }
 
     public function getRequestSettings()
@@ -272,5 +296,10 @@ class DownloadRequest
 
             $start = $end + 1;
         }
+    }
+
+    protected function reachChunkRetryLimit($retry)
+    {
+        return $retry >= $this->chunkRetry;
     }
 }
