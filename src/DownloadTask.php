@@ -1,6 +1,8 @@
 <?php namespace leoding86\Downloader;
 
 use Exception;
+use leoding86\Downloader\Exception\RequestException;
+use leoding86\Downloader\Exception\FileNotExistsException;
 
 class DownloadTask
 {
@@ -74,7 +76,15 @@ class DownloadTask
 
         $this->regiesterEventListeners();
 
-        $this->downloadRequest->begin();
+        try {
+            $this->downloadRequest->begin();
+        } catch (RequestException $e) {
+            if ($e->getCode() == DownloadRequest::FILE_NOT_EXISTS_ERROR) {
+                throw new FileNotExistsException($e->getMessage);
+            } else {
+                throw $e;
+            }
+        }
     }
 
     public function getFilename()
@@ -127,6 +137,15 @@ class DownloadTask
 
                 if ($this->verbose) {
                     printf("Download progress: $downloadedSize / $downloadRequest->fileSize (" . round($downloadedSize * 100 / $downloadRequest->fileSize, 1) . "%%)" . PHP_EOL);
+                }
+            }
+        );
+
+        $this->downloadRequest->attachEvent(
+            DownloadRequest::RETRY_READ_CHUNK_EVENT,
+            function ($downloadRequest, $retryTime) {
+                if ($this->verbose) {
+                    printf("Read chunk data failed, retry [retry time: {$retryTime}]" . PHP_EOL);
                 }
             }
         );
