@@ -1,6 +1,6 @@
 {
-    "name": "leoding86/downloader",
-    "description": "A simple downloader library",
+    "name": "leoding86/php-downloader",
+    "description": "It's php library for downloading files",
     "type": "library",
     "require": {
         "guzzlehttp/guzzle": "^6.3",
