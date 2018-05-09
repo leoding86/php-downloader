@@ -83,6 +83,8 @@ class DownloadRequest
 
     protected $retryChunkInterval = 300;
 
+    protected $skipDownload = false;
+
     public function __construct()
     {
         $this->beforeRequestEvent = EventFactory::create('DownloadRequest\\BeforeRequestEvent');
@@ -119,7 +121,17 @@ class DownloadRequest
     public function begin()
     {
         $this->requestFileSize();
+
+        if ($this->skipDownload) {
+            return;
+        }
+
         $this->requestFile();
+    }
+
+    public function skipDownload()
+    {
+        $this->skipDownload = true;
     }
 
     public function getRequest($requestType = 'GET')
