@@ -3,11 +3,40 @@
 use Exception;
 use leoding86\Downloader\Exception\RequestException;
 use leoding86\Downloader\Exception\FileNotExistsException;
+use leoding86\Downloader\Event\EventFactory;
 
 class DownloadTask
 {
     use Traits\MagicSetter;
     use Traits\MagicGetter;
+
+    /**
+     * Download begin event
+     *
+     * @var \leoding86\Downloader\Event\DownloadTask\BeginEvent
+     */
+    public $beginEvent;
+
+    /**
+     * Complete event
+     *
+     * @var \leoding86\Downloader\Event\DownloadTask\CompleteEvent
+     */
+    public $completeEvent;
+
+    /**
+     * Download progress event
+     *
+     * @var \leoding86\Downloader\Event\DownloadTask\ProgressEvent
+     */
+    public $progressEvent;
+
+    /**
+     * Download error event
+     *
+     * @var \leoding86\Downloader\Event\DownloadTask\ErrorEvent
+     */
+    public $errorEvent;
 
     protected $resource;
 
@@ -27,6 +56,11 @@ class DownloadTask
 
     protected $verbose = false;
 
+    /**
+     * Download request instance
+     *
+     * @var \leoding86\Downloader\DownloadRequest
+     */
     private $downloadRequest;
 
     private $file;
@@ -35,6 +69,12 @@ class DownloadTask
     {
         $this->setResource($resource);
         $this->setSaveDir($saveDir);
+
+        /* Initial events */
+        $this->beginEvent = EventFactory::create('DownloadTask\\BeginEvent');
+        $this->progressEvent = EventFactory::create('DownloadTask\\ProgressEvent');
+        $this->completeEvent = EventFactory::create('DownloadTask\\CompleteEvent');
+        $this->errorEvent = EventFactory::create('DownloadTask\\ErrorEvent');
     }
 
     public function setResource($resource)
@@ -109,56 +149,56 @@ class DownloadTask
 
     public function regiesterEventListeners()
     {
-        $this->downloadRequest->attachEvent(
-            DownloadRequest::REQUEST_FILE_SIZE_EVENT,
-            function ($downloadRequest, $fileSize, $response) {
-                if (is_null($this->filename)) {
-                    if (!empty($contentDisposition = $response->getHeader('Content-Disposition'))
-                        && preg_match('/filename="([^"]+)"/', $response->getHeaderLine('Content-Disposition'), $matches)
-                    ) {
-                        $this->filename = $matches[1];
-                    } else {
-                        $this->filename = $this->getFilename();
-                    }
-                }
-
-                $this->file = $this->createFile();
-
-                if ($this->verbose) {
-                    printf("File size is $fileSize" . PHP_EOL);
+        $this->downloadRequest->retrieveFileSizeEvent->addListener(function ($downloadRequest, $fileSize, $response) {
+            if (is_null($this->filename)) {
+                if (!empty($contentDisposition = $response->getHeader('Content-Disposition'))
+                    && preg_match('/filename="([^"]+)"/', $response->getHeaderLine('Content-Disposition'), $matches)
+                ) {
+                    $this->filename = $matches[1];
+                } else {
+                    $this->filename = $this->getFilename();
                 }
             }
-        );
 
-        $this->downloadRequest->attachEvent(
-            DownloadRequest::READ_CHUNKED_FILE_EVENT,
-            function ($downloadRequest, $chunkedData, $downloadedSize) {
-                fwrite($this->file, $chunkedData);
+            $this->file = $this->createFile();
 
-                if ($this->verbose) {
-                    printf("Download progress: $downloadedSize / $downloadRequest->fileSize (" . round($downloadedSize * 100 / $downloadRequest->fileSize, 1) . "%%)" . PHP_EOL);
-                }
+            if ($this->verbose) {
+                printf("File size is $fileSize" . PHP_EOL);
             }
-        );
 
-        $this->downloadRequest->attachEvent(
-            DownloadRequest::RETRY_READ_CHUNK_EVENT,
-            function ($downloadRequest, $retryTime) {
-                if ($this->verbose) {
-                    printf("Read chunk data failed, retry [retry time: {$retryTime}]" . PHP_EOL);
-                }
+            $this->beginEvent->dispatch($this, $fileSize);
+        });
+
+        $this->downloadRequest->retrieveChunkedDataEvent->addListener(function (
+            $downloadRequest,
+            $chunkedData,
+            $downloadedSize
+        ) {
+            fwrite($this->file, $chunkedData);
+
+            if ($this->verbose) {
+                printf("Download progress: $downloadedSize / $downloadRequest->fileSize (" . round($downloadedSize * 100 / $downloadRequest->fileSize, 1) . "%%)" . PHP_EOL);
             }
-        );
 
-        $this->downloadRequest->attachEvent(
-            DownloadRequest::COMPLETE_EVENT,
-            function ($downloadRequest) {
-                fclose($this->file);
+            /* Dispatch progress event */
+            $this->progressEvent->dispatch($this, $downloadedSize, $downloadRequest->fileSize);
+        });
 
-                if ($this->verbose) {
-                    printf("Download complete, save in {$this->getFullPath()}" . PHP_EOL);
-                }
+        $this->downloadRequest->retryRetrieveChunkedDataEvent->addListener(function ($downloadRequest, $retryTime) {
+            if ($this->verbose) {
+                printf("Read chunk data failed, retry [retry time: {$retryTime}]" . PHP_EOL);
             }
-        );
+        });
+
+        $this->downloadRequest->fileDownloadedEvent->addListener(function ($downloadRequest) {
+            fclose($this->file);
+
+            if ($this->verbose) {
+                printf("Download complete, save in {$this->getFullPath()}" . PHP_EOL);
+            }
+
+            /* Dispatch complete event */
+            $this->completeEvent->dispatch($this);
+        });
     }
 }

@@ -5,6 +5,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Exception\ClientException;
 use leoding86\Downloader\Exception\RequestException;
+use leoding86\Downloader\Event\EventFactory;
 
 class DownloadRequest
 {
@@ -24,6 +25,41 @@ class DownloadRequest
     const CANNOT_REQUEST_FILE_SIZE_ERROR = 103;
     const REQUEST_FILE_FAILED_ERROR = 104;
     const FILE_NOT_EXISTS_ERROR = 105;
+
+    /**
+     * Before request event
+     *
+     * @var \leoding86\Downloader\Event\DownloadRequest\BeforeRequestEvent
+     */
+    public $beforeRequestEvent;
+
+    /**
+     * Before request event
+     *
+     * @var \leoding86\Downloader\Event\DownloadRequest\RetrieveChunkedDataEvent
+     */
+    public $retrieveChunkedDataEvent;
+
+    /**
+     * Before request event
+     *
+     * @var \leoding86\Downloader\Event\DownloadRequest\FileDownloadedEvent
+     */
+    public $fileDownloadedEvent;
+
+    /**
+     * Before request event
+     *
+     * @var \leoding86\Downloader\Event\DownloadRequest\RetrieveFileSizeEvent
+     */
+    public $retrieveFileSizeEvent;
+
+    /**
+     * Before request event
+     *
+     * @var \leoding86\Downloader\Event\DownloadRequest\RetryRetrieveChunkedDataEvent
+     */
+    public $retryRetrieveChunkedDataEvent;
 
     protected $resource; // 资源地址
 
@@ -46,6 +82,15 @@ class DownloadRequest
     protected $chunkRetry = 5;
 
     protected $retryChunkInterval = 300;
+
+    public function __construct()
+    {
+        $this->beforeRequestEvent = EventFactory::create('DownloadRequest\\BeforeRequestEvent');
+        $this->retrieveChunkedDataEvent = EventFactory::create('DownloadRequest\\RetrieveChunkedDataEvent');
+        $this->fileDownloadedEvent = EventFactory::create('DownloadRequest\\FileDownloadedEvent');
+        $this->retrieveFileSizeEvent = EventFactory::create('DownloadRequest\\RetrieveFileSizeEvent');
+        $this->retryRetrieveChunkedDataEvent = EventFactory::create('DownloadRequest\\RetryRetrieveChunkedDataEvent');
+    }
 
     public function setChunkSize($size)
     {
@@ -97,7 +142,7 @@ class DownloadRequest
         try {
             $requestSettings = $this->getRequestSettings();
 
-            $this->dispatchEvent(self::BEFORE_REQUEST_EVENT, [$this, $request]);
+            $this->beforeRequestEvent->dispatch($this, $request);
 
             $response = $client->send($request, $requestSettings);
         } catch (ClientException $e) {
@@ -119,7 +164,7 @@ class DownloadRequest
             throw new RequestExcetpion(null, self::FILE_TOO_SMALL_ERROR);
         }
 
-        $this->dispatchEvent(self::REQUEST_FILE_SIZE_EVENT, [$this, $this->fileSize, $response]);
+        $this->retrieveFileSizeEvent->dispatch($this, $this->fileSize, $response);
 
         $this->sliceFileToChunks($this->chunkSize, $this->fileSize);
     }
@@ -131,20 +176,19 @@ class DownloadRequest
         } else {
             $this->requestFileWithRangeHeader();
         }
+
+        $this->fileDownloadedEvent->dispatch($this);
     }
 
     public function requestFileWithStream()
     {
         $request = $this->getRequest();
-
-        $this->dispatchEvent(self::BEFORE_REQUEST_FILE_EVENT, [$this, $request]);
-        
         $client = new Client;
 
         try {
             $requestSettings = $this->getRequestSettings();
 
-            $this->dispatchEvent(self::BEFORE_REQUEST_EVENT, [$this, $request]);
+            $this->beforeRequestEvent->dispatch($this, $request);
 
             $response = $client->send($request, $requestSettings);
         } catch (ClientException $e) {
@@ -155,44 +199,36 @@ class DownloadRequest
         $downloadedSize = 0;
 
         while (!$body->eof()) {
-            $chunkedFile = $body->read($this->chunkSize);
-            $downloadedSize += strlen($chunkedFile);
+            $chunkedData = $body->read($this->chunkSize);
+            $downloadedSize += strlen($chunkedData);
 
-            $this->dispatchEvent(
-                self::READ_CHUNKED_FILE_EVENT,
-                [$this, $chunkedFile, $downloadedSize]
-            );
+            /* Dispatch retrieve chunked file data event */
+            $this->retrieveChunkedDataEvent->dispatch($this, $chunkedData, $downloadedSize);
 
             if ($downloadedSize >= $this->fileSize) {
                 break;
             }
         }
-
-        $this->dispatchEvent(self::COMPLETE_EVENT, [$this]);
     }
 
     public function requestFileWithRangeHeader()
     {
         $request = $this->getRequest();
 
-        $this->dispatchEvent(self::BEFORE_REQUEST_FILE_EVENT, [$this, $request]);
-
         try {
             $requestSettings = $this->getRequestSettings();
-            $this->dispatchEvent(self::BEFORE_REQUEST_EVENT, [$this, $request]);
+
+            /* Dispatch before quest event */
+            $this->beforeRequestEvent->dispatch($this, $request);
+            
             $downloadedSize = 0;
 
             while (!$this->eoc()) {
-                $chunkedFile = $this->readChunk($request);
-                $downloadedSize += strlen($chunkedFile);
+                $chunkedData = $this->readChunk($request);
+                $downloadedSize += strlen($chunkedData);
 
-                $this->dispatchEvent(
-                    self::READ_CHUNKED_FILE_EVENT,
-                    [$this, $chunkedFile, $downloadedSize]
-                );
+                $this->retrieveChunkedDataEvent->dispatch($this, $chunkedData, $downloadedSize);
             }
-
-            $this->dispatchEvent(self::COMPLETE_EVENT, [$this]);
         } catch (ClientException $e) {
             throw new RequestException(null, self::REQUEST_FILE_FAILED_ERROR);
         }
@@ -211,7 +247,7 @@ class DownloadRequest
                 $chunkData = $client->send($request, $this->getRequestSettings())->getBody();
                 return $chunkData;
             } catch (Exception $e) {
-                $this->dispatchEvent(self::RETRY_READ_CHUNK_EVENT, [$this, $retry]);
+                $this->retryRetrieveChunkedDataEvent->dispatch($this, $retry);
                 $lastException = $e;
             }
         }
