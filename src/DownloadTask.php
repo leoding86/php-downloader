@@ -3,12 +3,17 @@
 use Exception;
 use leoding86\Downloader\Exception\RequestException;
 use leoding86\Downloader\Exception\FileNotExistsException;
+use leoding86\Downloader\Exception\NotEnoughSpacesException;
 use leoding86\Downloader\Event\EventFactory;
 
 class DownloadTask
 {
     use Traits\MagicSetter;
     use Traits\MagicGetter;
+
+    const OVERRIDE_MODE = 1;
+    const RENAME_MODE = 2;
+    const SKIP_MODE = 3;
 
     /**
      * Download begin event
@@ -31,13 +36,6 @@ class DownloadTask
      */
     public $progressEvent;
 
-    /**
-     * Download error event
-     *
-     * @var \leoding86\Downloader\Event\DownloadTask\ErrorEvent
-     */
-    public $errorEvent;
-
     protected $resource;
 
     protected $headers;
@@ -54,27 +52,34 @@ class DownloadTask
 
     protected $enableStream;
 
+    protected $replaceMode;
+
     protected $verbose = false;
 
     /**
      * Download request instance
      *
-     * @var \leoding86\Downloader\DownloadRequest
+     * @var DownloadRequest
      */
     private $downloadRequest;
 
-    private $file;
+    /**
+     * File is downloading
+     *
+     * @var DownloadFile
+     */
+    private $downloadFile;
 
-    public function __construct($resource, $saveDir)
+    public function __construct($resource, $saveDir, $replaceMode = self::RENAME_MODE)
     {
         $this->setResource($resource);
         $this->setSaveDir($saveDir);
+        $this->replaceMode = $replaceMode;
 
         /* Initial events */
         $this->beginEvent = EventFactory::create('DownloadTask\\BeginEvent');
         $this->progressEvent = EventFactory::create('DownloadTask\\ProgressEvent');
         $this->completeEvent = EventFactory::create('DownloadTask\\CompleteEvent');
-        $this->errorEvent = EventFactory::create('DownloadTask\\ErrorEvent');
     }
 
     public function setResource($resource)
@@ -136,20 +141,25 @@ class DownloadTask
         }
     }
 
-    public function createFile()
+    public function getFullPath($rename = false)
     {
-        $file = fopen($this->getFullPath(), 'w+');
-        return $file;
-    }
+        if ($rename) {
+            if (($dotPos = strrpos($this->filename, '.')) > -1) {
+                $name = substr($this->filename, 0, $dotPos) . '.' . time() . substr($this->filename, $dotPos);
+            } else {
+                $name = $this->filename . '.' . time();
+            }
+        } else {
+            $name = $this->filename;
+        }
 
-    public function getFullPath()
-    {
-        return $this->saveDir . '/' . $this->filename;
+        return $this->saveDir . '/' . $name;
     }
 
     public function regiesterEventListeners()
     {
         $this->downloadRequest->retrieveFileSizeEvent->addListener(function ($downloadRequest, $fileSize, $response) {
+            /* determine file save name */
             if (is_null($this->filename)) {
                 if (!empty($contentDisposition = $response->getHeader('Content-Disposition'))
                     && preg_match('/filename="([^"]+)"/', $response->getHeaderLine('Content-Disposition'), $matches)
@@ -160,11 +170,37 @@ class DownloadTask
                 }
             }
 
-            $this->file = $this->createFile();
-
             if ($this->verbose) {
                 printf("File size is $fileSize" . PHP_EOL);
             }
+
+            if (disk_free_space($this->saveDir) <= $fileSize) {
+                throw new NotEnoughSpacesException('There is not enough spaces for save file');
+            }
+
+            if (is_file($this->getFullPath())) {
+                switch ($this->replaceMode) {
+                    case self::OVERRIDE_MODE:
+                        $filename = $this->getFullPath();
+                        break;
+                    case self::RENAME_MODE:
+                        $filename = $this->getFullPath(true);
+                        break;
+                    case self::SKIP_MODE:
+                    default:
+                        $this->downloadRequest->skipDownload();
+
+                        if ($this->verbose) {
+                            printf("Skip downloading file, already exists in {$this->getFullPath()}");
+                        }
+
+                        return;
+                }
+            } else {
+                $filename = $this->getFullPath();
+            }
+
+            $this->downloadFile = new DownloadFile($filename, $fileSize);
 
             $this->beginEvent->dispatch($this, $fileSize);
         });
@@ -174,7 +210,7 @@ class DownloadTask
             $chunkedData,
             $downloadedSize
         ) {
-            fwrite($this->file, $chunkedData);
+            $this->downloadFile->writeData($chunkedData);
 
             if ($this->verbose) {
                 printf("Download progress: $downloadedSize / $downloadRequest->fileSize (" . round($downloadedSize * 100 / $downloadRequest->fileSize, 1) . "%%)" . PHP_EOL);
@@ -191,10 +227,10 @@ class DownloadTask
         });
 
         $this->downloadRequest->fileDownloadedEvent->addListener(function ($downloadRequest) {
-            fclose($this->file);
+            $this->downloadFile->complete();
 
             if ($this->verbose) {
-                printf("Download complete, save in {$this->getFullPath()}" . PHP_EOL);
+                printf("Download complete, save in {$this->downloadFile->getSavedFilename()}" . PHP_EOL);
             }
 
             /* Dispatch complete event */
