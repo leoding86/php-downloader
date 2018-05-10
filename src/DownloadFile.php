@@ -23,11 +23,21 @@ class DownloadFile
         if (false === ($file = @fopen($this->getTempFilename(), 'w+'))) {
             throw new Exception('Cannot open file');
         }
-        
-        if (false === fwrite($file, str_repeat(0, $fileSize)) ||
-            false === rewind($file)
-        ) {
-            throw new Exception('Cannot fill data to temp file');
+
+        $chunkLength = 1024;
+
+        for ($wroteLength = 0, $size = 0; $wroteLength < $fileSize; $wroteLength += $size) {
+            if (($size = $fileSize - $wroteLength) > $chunkLength) {
+                $size = $chunkLength;
+            }
+
+            if (false === fwrite($file, str_repeat(0, $size))) {
+                throw new Exception('Cannot fill data to temp file');
+            }
+        }
+
+        if (false === rewind($file)) {
+            throw new Exception('Cannot rewind pointer of temp file to beginning');
         }
 
         return $file;
