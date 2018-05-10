@@ -6,9 +6,11 @@ abstract class AbstractEvent
 {
     protected $listeners = [];
 
-    public function dispatch($instance)
+    public function __construct()
     {
-        throw new Exception("Must implement method dispatch in child class");
+        if (!method_exists($this, 'dispatch')) {
+            throw new Exception("Must implement method dispatch in child class");
+        }
     }
 
     public function addListener($listener)
